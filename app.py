@@ -9,6 +9,7 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy.exc import IntegrityError as DatabaseIntegrityError
 
 import database as db
 import forecasting as fc
@@ -55,14 +56,14 @@ with st.sidebar:
                   width="stretch", on_click=navigate, args=(destination,))
     page = st.session_state.page
     st.divider()
-    st.caption("Local prototype · SQLite + local files")
+    st.caption(f"{'RDS PostgreSQL' if db.BACKEND == 'postgresql' else 'Local SQLite'} · local model and upload files")
 
 def dataframe(frame: pd.DataFrame) -> None:
     st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def failure(exc: Exception) -> None:
-    if isinstance(exc, sqlite3.IntegrityError):
+    if isinstance(exc, (sqlite3.IntegrityError, DatabaseIntegrityError)):
         st.error("This product is in use by stock or sales records. Remove those references first.")
     else:
         st.error(str(exc))

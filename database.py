@@ -1,13 +1,16 @@
-"""Local SQLite storage. AWS deployment can replace this adapter with DynamoDB."""
+"""Store data: local SQLite by default, PostgreSQL when DB_HOST is configured."""
 
 from __future__ import annotations
 
 import hashlib
 import io
+import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from typing import Iterator
 
 import pandas as pd
 
@@ -18,12 +21,17 @@ DB_PATH = DATA_DIR / "store.db"
 STORE_ID = "__SINGLE_STORE__"
 
 
-def connect() -> sqlite3.Connection:
+@contextmanager
+def connect() -> Iterator[sqlite3.Connection]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
     connection.execute("PRAGMA foreign_keys = ON")
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def init_db() -> None:
@@ -232,4 +240,14 @@ def log_alert(sku: str, message: str) -> None:
     with connect() as db:
         db.execute("INSERT INTO alerts(branch_id,sku,message) VALUES(?,?,?)",
                    (STORE_ID, sku, message))
+
+
+BACKEND = "sqlite"
+if os.environ.get("DB_HOST"):
+    from postgres_database import (  # noqa: F401
+        add_sale, connect, delete_inventory, delete_product, import_sales_csv,
+        init_db, log_alert, save_product, set_inventory, table, weekly_sales,
+    )
+
+    BACKEND = "postgresql"
 
