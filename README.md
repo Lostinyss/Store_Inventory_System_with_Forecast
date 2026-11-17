@@ -12,13 +12,13 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Before opening the app, configure OIDC sign-in as described below. Open `http://localhost:8501`, sign in with an approved account, then add products and stock on the Inventory page.
+Before opening the app, configure OIDC sign-in as described below. Open `http://localhost:8501`, sign in with a Cognito account, then add products and stock on the Inventory page.
 
 ## Sitewide login
 
 Every page requires an OIDC sign-in. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in the client ID, client secret, discovery URL, random cookie secret, and exact redirect URI from your identity provider. Register `http://localhost:8501/oauth2callback` for local development or `https://YOUR_DOMAIN/oauth2callback` for EC2. The secrets file is ignored by Git. The `streamlit[auth]` requirement installs Authlib for this feature.
 
-Allow only specific accounts by setting `STORE_ALLOWED_SUBJECTS` to comma-separated OIDC `sub` identifiers, or `STORE_ALLOWED_EMAILS` to comma-separated email addresses. Email access requires the provider to assert `email_verified=true`. An authenticated account not on either list cannot open the app. If both settings are empty, everyone is denied. A denied user can see their OIDC subject on the access-denied screen so an administrator can add it to the allowlist. Sign out from the sidebar. Keep the separate Model Settings admin key for model uploads and activation.
+Every account that signs in through the configured OIDC user pool can access the website. Keep Cognito self-registration disabled and create only the accounts you intend to admit. Sign out from the sidebar. Keep the separate Model Settings admin key for model uploads and activation.
 
 For an AWS deployment, Amazon Cognito can serve as the OIDC provider. See [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md) for the HTTPS and EC2 settings. The S3-triggered CSV Lambda is controlled by AWS IAM and bucket access, not by the website login.
 

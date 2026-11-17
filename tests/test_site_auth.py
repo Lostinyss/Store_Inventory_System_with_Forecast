@@ -1,25 +1,36 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from site_auth import allowed_identity
+import site_auth
 
 
-class SiteAuthorizationTests(unittest.TestCase):
-    def test_missing_allowlist_denies_access(self):
-        self.assertFalse(allowed_identity({"sub": "user-1", "email": "a@example.com",
-                                           "email_verified": True}, "", ""))
+class StopRun(Exception):
+    pass
 
-    def test_subject_allowlist_allows_exact_subject(self):
-        self.assertTrue(allowed_identity({"sub": "user-1"}, "user-1,user-2", ""))
-        self.assertFalse(allowed_identity({"sub": "user-10"}, "user-1", ""))
 
-    def test_email_requires_provider_verification(self):
-        user = {"sub": "other", "email": "A@Example.com", "email_verified": False}
-        self.assertFalse(allowed_identity(user, "", "a@example.com"))
-        user["email_verified"] = "true"
-        self.assertTrue(allowed_identity(user, "", "a@example.com"))
+class SiteAuthenticationTests(unittest.TestCase):
+    def test_anonymous_user_cannot_continue_to_app(self):
+        fake_streamlit = SimpleNamespace(
+            user={"is_logged_in": False},
+            title=Mock(),
+            write=Mock(),
+            button=Mock(return_value=False),
+            stop=Mock(side_effect=StopRun),
+        )
+        with patch.object(site_auth, "st", fake_streamlit):
+            with self.assertRaises(StopRun):
+                site_auth.require_login()
+        fake_streamlit.stop.assert_called_once()
 
-    def test_missing_claims_are_denied(self):
-        self.assertFalse(allowed_identity({}, "user-1", "a@example.com"))
+    def test_authenticated_user_can_continue_without_allowlist(self):
+        fake_streamlit = SimpleNamespace(
+            user={"is_logged_in": True, "sub": "any-pool-user"},
+            stop=Mock(side_effect=StopRun),
+        )
+        with patch.object(site_auth, "st", fake_streamlit):
+            site_auth.require_login()
+        fake_streamlit.stop.assert_not_called()
 
 
 if __name__ == "__main__":

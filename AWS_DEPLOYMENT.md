@@ -4,9 +4,9 @@ The application runs on EC2, with RDS PostgreSQL, a private S3 bucket, an S3-tri
 
 ## 1. Prepare RDS and the EC2 app
 
-After configuring login, start the app and sign in with an approved account with `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` configured. It creates the `import_jobs` and `alert_state` tables and updates the existing `alerts` table. Confirm the sidebar says **RDS PostgreSQL**. Existing SQLite data is not migrated. Do not commit credentials to Git.
+After configuring login, start the app and sign in with a Cognito account with `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` configured. It creates the `import_jobs` and `alert_state` tables and updates the existing `alerts` table. Confirm the sidebar says **RDS PostgreSQL**. Existing SQLite data is not migrated. Do not commit credentials to Git.
 
-Every website page requires OIDC login and an approved account. Configure the login and HTTPS steps in section 6 before opening the website publicly. Streamlit must be restarted after changing environment variables or secrets.
+Every website page requires OIDC login. Any account in the configured Cognito user pool can access the website, so keep self-registration disabled and manage accounts in Cognito. Configure the login and HTTPS steps in section 6 before opening the website publicly. Streamlit must be restarted after changing environment variables or secrets.
 
 ## 2. Create S3 storage
 
@@ -67,7 +67,7 @@ The app does not yet implement HTTPS, scheduled checks while nobody uses the app
 2. Create or use a domain name for the website. Request an ACM certificate for that name in the same Region as an Application Load Balancer (ALB). Create an HTTPS listener on port 443 with the ACM certificate, forwarding to a target group that reaches EC2 on port 8501. Redirect HTTP port 80 to HTTPS. [ALB HTTPS certificates](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/https-listener-certificates.html)
 3. Allow public 443 traffic to the ALB. Restrict EC2 inbound port 8501 to the **ALB security group only**; never expose the direct Streamlit port publicly. Keep RDS private and reachable only from the EC2/Lambda security groups. [AWS network guidance](https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/infrastructure-security.html)
 4. On EC2, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` in the app directory. Set the HTTPS `redirect_uri`, a fresh random `cookie_secret`, Cognito client ID, Cognito client secret, and Cognito discovery URL. Keep this file out of Git and readable only by the app's OS user. `streamlit[auth]` in `requirements.txt` installs the required Authlib package. [Streamlit OIDC settings](https://docs.streamlit.io/develop/api-reference/user/st.login)
-5. Set `STORE_ALLOWED_SUBJECTS` to the allowed OIDC `sub` values, or `STORE_ALLOWED_EMAILS` to verified email addresses, in the private EC2 service environment. No allowlist means no website access. After the first OIDC login, the denied screen displays the account subject for allowlisting; restart Streamlit after updating the service environment. Keep `MODEL_ADMIN_PASSWORD` private if you want separate model administration.
-6. Install the updated requirements and restart the Streamlit service. Test an anonymous browser, an unapproved account, an approved account, sign out, and a Model Settings action. Check that `https://YOUR_DOMAIN` works and direct public access to port 8501 does not.
+5. Disable Cognito self-registration and create only the user accounts you want to access the website. The app does not require `STORE_ALLOWED_SUBJECTS` or `STORE_ALLOWED_EMAILS`. Keep `MODEL_ADMIN_PASSWORD` private if you want separate model administration.
+6. Install the updated requirements and restart the Streamlit service. Test an anonymous browser, a Cognito account, sign out, and a Model Settings action. Check that `https://YOUR_DOMAIN` works and direct public access to port 8501 does not.
 
 Website sign-in applies to Streamlit pages and actions. The S3-triggered Lambda uses its IAM role and private RDS connection; restrict direct uploads to `sales-imports/` through IAM so a person cannot bypass the website's CSV validation flow.
