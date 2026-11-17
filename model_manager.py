@@ -17,6 +17,7 @@ import pandas as pd
 
 import database as db
 import forecasting as fc
+import cloud_services as cloud
 
 
 MAX_MODEL_BYTES = 50 * 1024 * 1024
@@ -155,6 +156,7 @@ def activate_global(model_bytes: bytes, history_bytes: bytes | None = None,
     current = global_state()
     _write_json(fc.GLOBAL_REGISTRY, {"active": revision,
                                      "previous": current.get("active", "bundled")})
+    cloud.persist_models()
     return revision
 
 
@@ -164,6 +166,7 @@ def restore_global() -> None:
     if previous is None:
         raise ValueError("No previous Kaggle model is available")
     _write_json(fc.GLOBAL_REGISTRY, {"active": previous, "previous": state["active"]})
+    cloud.persist_models()
 
 
 def activate_product(model_bytes: bytes, sku: str, history: pd.Series) -> str:
@@ -175,6 +178,7 @@ def activate_product(model_bytes: bytes, sku: str, history: pd.Series) -> str:
     current = product_state(sku)
     _write_json(fc._local_pointer_path(sku), {"active": revision,
                                               "previous": current.get("active", "trained")})
+    cloud.persist_models()
     return revision
 
 
@@ -185,6 +189,7 @@ def restore_product(sku: str) -> None:
         raise ValueError("No previous product model is available")
     _write_json(fc._local_pointer_path(sku), {"active": previous,
                                               "previous": state["active"]})
+    cloud.persist_models()
 
 
 def fingerprint(*parts: bytes | str | None) -> str:

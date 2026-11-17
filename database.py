@@ -81,8 +81,17 @@ def init_db() -> None:
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS alert_state (
+                sku TEXT PRIMARY KEY REFERENCES products(sku) ON DELETE CASCADE,
+                active INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
+        columns = {row[1] for row in db.execute("PRAGMA table_info(alerts)")}
+        if "sns_message_id" not in columns:
+            db.execute("ALTER TABLE alerts ADD COLUMN sns_message_id TEXT")
+        if "is_automatic" not in columns:
+            db.execute("ALTER TABLE alerts ADD COLUMN is_automatic INTEGER NOT NULL DEFAULT 0")
         # Consolidate records once, preserving a copy of the pre-conversion DB.
         if db.execute("SELECT COUNT(*) FROM branches WHERE branch_id != ?", (STORE_ID,)).fetchone()[0]:
             backup = DB_PATH.with_name("store_before_single_store.db")
@@ -115,7 +124,10 @@ def table(name: str) -> pd.DataFrame:
         """,
         "sales": "SELECT sale_date, sku, quantity, source FROM sales ORDER BY sale_date DESC, id DESC",
         "imports": "SELECT * FROM imports ORDER BY created_at DESC",
-        "alerts": "SELECT id, sku, message, created_at FROM alerts ORDER BY id DESC",
+        "alerts": """SELECT id, sku, message, created_at,
+            CASE WHEN sns_message_id IS NOT NULL THEN 'sent'
+                 WHEN is_automatic=1 THEN 'pending' ELSE 'manual' END AS email_status
+            FROM alerts ORDER BY id DESC""",
     }
     if name not in allowed:
         raise ValueError("Unknown table")
@@ -159,6 +171,7 @@ def delete_inventory(sku: str) -> None:
     with connect() as db:
         db.execute("DELETE FROM inventory WHERE branch_id=? AND sku=?",
                    (STORE_ID, sku))
+        db.execute("UPDATE alert_state SET active=0 WHERE sku=?", (sku,))
 
 
 def add_sale(sale_date: date, sku: str, quantity: int,
@@ -242,11 +255,38 @@ def log_alert(sku: str, message: str) -> None:
                    (STORE_ID, sku, message))
 
 
+def record_reorder_transition(sku: str, message: str, below_point: bool) -> bool:
+    with connect() as connection:
+        connection.execute("INSERT OR IGNORE INTO alert_state(sku,active) VALUES(?,0)", (sku,))
+        if not below_point:
+            connection.execute("UPDATE alert_state SET active=0 WHERE sku=?", (sku,))
+            return False
+        changed = connection.execute(
+            "UPDATE alert_state SET active=1 WHERE sku=? AND active=0", (sku,)).rowcount
+        if changed:
+            connection.execute("INSERT INTO alerts(branch_id,sku,message,is_automatic) VALUES(?,?,?,1)",
+                               (STORE_ID, sku, message))
+        return bool(changed)
+
+
+def pending_alerts() -> list[dict]:
+    with connect() as connection:
+        return [dict(row) for row in connection.execute(
+            "SELECT id,sku,message FROM alerts WHERE sns_message_id IS NULL AND is_automatic=1 ORDER BY id LIMIT 25")]
+
+
+def mark_alert_sent(alert_id: int, message_id: str) -> None:
+    with connect() as connection:
+        connection.execute("UPDATE alerts SET sns_message_id=? WHERE id=? AND sns_message_id IS NULL",
+                           (message_id, alert_id))
+
+
 BACKEND = "sqlite"
 if os.environ.get("DB_HOST"):
     from postgres_database import (  # noqa: F401
         add_sale, connect, delete_inventory, delete_product, import_sales_csv,
-        init_db, log_alert, save_product, set_inventory, table, weekly_sales,
+        init_db, log_alert, mark_alert_sent, pending_alerts, record_reorder_transition,
+        save_product, set_inventory, table, weekly_sales, queue_import, fail_import,
     )
 
     BACKEND = "postgresql"

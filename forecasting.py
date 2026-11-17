@@ -185,6 +185,8 @@ def train_local_model(sku: str, history: pd.Series) -> dict:
         temporary = pointer.with_suffix(".tmp")
         temporary.write_text(json.dumps(new_state), encoding="utf-8")
         os.replace(temporary, pointer)
+    import cloud_services as cloud
+    cloud.persist_models()
     return artifact
 
 

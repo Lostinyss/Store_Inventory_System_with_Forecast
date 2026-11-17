@@ -90,6 +90,22 @@ def init_db() -> None:
             message TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""",
+        """CREATE TABLE IF NOT EXISTS alert_state (
+            sku TEXT PRIMARY KEY REFERENCES products(sku) ON DELETE CASCADE,
+            active BOOLEAN NOT NULL DEFAULT FALSE
+        )""",
+        """CREATE TABLE IF NOT EXISTS import_jobs (
+            file_hash TEXT PRIMARY KEY,
+            file_name TEXT NOT NULL,
+            s3_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            imported_rows INTEGER NOT NULL DEFAULT 0,
+            error TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS sns_message_id TEXT",
+        "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS is_automatic BOOLEAN NOT NULL DEFAULT FALSE",
     )
     with ENGINE.begin() as connection:
         for statement in statements:
@@ -109,7 +125,11 @@ def table(name: str) -> pd.DataFrame:
             JOIN products p USING(sku) WHERE i.branch_id=:branch_id ORDER BY i.sku""",
         "sales": "SELECT sale_date, sku, quantity, source FROM sales ORDER BY sale_date DESC, id DESC",
         "imports": "SELECT * FROM imports ORDER BY created_at DESC",
-        "alerts": "SELECT id, sku, message, created_at FROM alerts ORDER BY id DESC",
+        "alerts": """SELECT id, sku, message, created_at,
+            CASE WHEN sns_message_id IS NOT NULL THEN 'sent'
+                 WHEN is_automatic THEN 'pending' ELSE 'manual' END AS email_status
+            FROM alerts ORDER BY id DESC""",
+        "import_jobs": "SELECT file_name, status, imported_rows, error, created_at, updated_at FROM import_jobs ORDER BY created_at DESC",
     }
     if name not in allowed:
         raise ValueError("Unknown table")
@@ -155,6 +175,8 @@ def delete_inventory(sku: str) -> None:
         connection.execute(text("""DELETE FROM inventory
             WHERE branch_id=:branch_id AND sku=:sku"""),
             {"branch_id": STORE_ID, "sku": sku})
+        connection.execute(text("UPDATE alert_state SET active=FALSE WHERE sku=:sku"),
+                           {"sku": sku})
 
 
 def add_sale(sale_date: date, sku: str, quantity: int,
@@ -247,3 +269,61 @@ def log_alert(sku: str, message: str) -> None:
         connection.execute(text("""INSERT INTO alerts(branch_id, sku, message)
             VALUES (:branch_id, :sku, :message)"""),
             {"branch_id": STORE_ID, "sku": sku, "message": message})
+
+
+def queue_import(file_hash: str, file_name: str, s3_key: str) -> bool:
+    """Return false for a file already imported or currently queued."""
+    with ENGINE.begin() as connection:
+        if connection.execute(text("SELECT 1 FROM imports WHERE file_hash=:hash"),
+                              {"hash": file_hash}).first():
+            return False
+        row = connection.execute(text("SELECT status FROM import_jobs WHERE file_hash=:hash"),
+                                 {"hash": file_hash}).first()
+        if row and row[0] in ("queued", "processing", "completed"):
+            return False
+        connection.execute(text("""INSERT INTO import_jobs(file_hash,file_name,s3_key,status,error,updated_at)
+            VALUES (:hash,:name,:key,'queued','',CURRENT_TIMESTAMP)
+            ON CONFLICT(file_hash) DO UPDATE SET status='queued',error='',
+                updated_at=CURRENT_TIMESTAMP"""),
+            {"hash": file_hash, "name": file_name, "key": s3_key})
+        return True
+
+
+def fail_import(file_hash: str, reason: str) -> None:
+    with ENGINE.begin() as connection:
+        connection.execute(text("""UPDATE import_jobs SET status='failed', error=:error,
+            updated_at=CURRENT_TIMESTAMP WHERE file_hash=:hash"""),
+            {"error": reason[:1000], "hash": file_hash})
+
+
+def record_reorder_transition(sku: str, message: str, below_point: bool) -> bool:
+    """Create one alert per crossing below the threshold, atomically."""
+    with ENGINE.begin() as connection:
+        connection.execute(text("""INSERT INTO alert_state(sku,active) VALUES (:sku,FALSE)
+            ON CONFLICT(sku) DO NOTHING"""), {"sku": sku})
+        if not below_point:
+            connection.execute(text("UPDATE alert_state SET active=FALSE WHERE sku=:sku"),
+                               {"sku": sku})
+            return False
+        changed = connection.execute(text("""UPDATE alert_state SET active=TRUE
+            WHERE sku=:sku AND active=FALSE RETURNING sku"""), {"sku": sku}).first()
+        if not changed:
+            return False
+        connection.execute(text("""INSERT INTO alerts(branch_id,sku,message,is_automatic)
+            VALUES (:branch,:sku,:message,TRUE)"""),
+            {"branch": STORE_ID, "sku": sku, "message": message})
+        return True
+
+
+def pending_alerts() -> list[dict]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(text("""SELECT id,sku,message FROM alerts
+            WHERE sns_message_id IS NULL AND is_automatic=TRUE ORDER BY id LIMIT 25""")).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def mark_alert_sent(alert_id: int, message_id: str) -> None:
+    with ENGINE.begin() as connection:
+        connection.execute(text("""UPDATE alerts SET sns_message_id=:message_id
+            WHERE id=:id AND sns_message_id IS NULL"""),
+            {"id": alert_id, "message_id": message_id})

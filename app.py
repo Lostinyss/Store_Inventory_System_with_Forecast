@@ -5,19 +5,35 @@ from __future__ import annotations
 import sqlite3
 import math
 import hmac
+import hashlib
 from datetime import date
 
 import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import IntegrityError as DatabaseIntegrityError
 
-import database as db
-import forecasting as fc
-import model_manager as mm
+from site_auth import require_login
 
 
 st.set_page_config(page_title="Store Forecast Studio", page_icon="📦", layout="wide")
+require_login()
+
+# Keep service modules and their initialization behind the sitewide access check.
+import database as db
+import forecasting as fc
+import model_manager as mm
+import cloud_services as cloud
+import alert_service as alerting
+
 db.init_db()
+if cloud.bucket_name() and db.BACKEND != "postgresql":
+    st.error("AWS_S3_BUCKET requires an RDS PostgreSQL connection (set DB_HOST and DB credentials).")
+    st.stop()
+try:
+    cloud.restore_models_once()
+except Exception as exc:
+    st.error(f"Could not restore models from S3: {exc}")
+    st.stop()
 
 st.markdown("""
 <style>
@@ -40,6 +56,9 @@ st.markdown("""
 PAGES = ["Overview", "Inventory", "Sales", "Forecast", "Accuracy", "Alerts", "Settings"]
 if st.session_state.get("page") not in PAGES:
     st.session_state.page = PAGES[0]
+_, alert_error = alerting.deliver_pending()
+if alert_error:
+    st.warning(f"An inventory alert is saved but SNS delivery needs attention: {alert_error}")
 
 
 def navigate(destination: str) -> None:
@@ -48,6 +67,9 @@ def navigate(destination: str) -> None:
 
 with st.sidebar:
     st.title("📦 Store Forecast")
+    st.caption(f"Signed in: {st.user.get('email') or st.user.get('sub') or 'account'}")
+    if st.button("Sign out", key="site_sign_out", width="stretch"):
+        st.logout()
     st.caption("WORKSPACE")
     for index, destination in enumerate(PAGES):
         active = st.session_state.page == destination
@@ -56,7 +78,22 @@ with st.sidebar:
                   width="stretch", on_click=navigate, args=(destination,))
     page = st.session_state.page
     st.divider()
-    st.caption(f"{'RDS PostgreSQL' if db.BACKEND == 'postgresql' else 'Local SQLite'} · local model and upload files")
+    st.caption(f"{'RDS PostgreSQL' if db.BACKEND == 'postgresql' else 'Local SQLite'} · "
+               f"{'S3 models and CSV imports' if cloud.bucket_name() else 'local files'}")
+
+
+def check_reorder(sku: str) -> None:
+    try:
+        alerting.check_product(sku)
+        _, error = alerting.deliver_pending()
+        if error:
+            st.session_state.alert_notice = f"Alert saved; SNS delivery failed: {error}"
+    except Exception as exc:
+        st.session_state.alert_notice = f"Could not check reorder status: {exc}"
+
+
+if notice := st.session_state.pop("alert_notice", None):
+    st.warning(notice)
 
 def dataframe(frame: pd.DataFrame) -> None:
     st.dataframe(frame, width="stretch", hide_index=True)
@@ -89,6 +126,7 @@ def product_editor(sku: str | None = None) -> None:
     if save:
         try:
             db.save_product(chosen_sku, name, category, storage, int(lead), int(safety))
+            check_reorder(chosen_sku)
             st.rerun()
         except Exception as exc:
             failure(exc)
@@ -120,6 +158,7 @@ def inventory_editor(sku: str | None = None) -> None:
     if save:
         try:
             db.set_inventory(chosen_sku, int(quantity))
+            check_reorder(chosen_sku)
             st.rerun()
         except Exception as exc:
             failure(exc)
@@ -137,6 +176,8 @@ def record_sale_dialog() -> None:
     if save:
         try:
             db.add_sale(sale_date, sku, int(quantity), reduce_stock)
+            if reduce_stock:
+                check_reorder(sku)
             st.session_state.sales_notice = "Sale recorded"
             st.rerun()
         except Exception as exc:
@@ -151,12 +192,29 @@ def import_sales_dialog() -> None:
     uploaded = st.file_uploader("Sales CSV", type="csv")
     if st.button("Validate and import", type="primary", disabled=uploaded is None):
         try:
-            count = db.import_sales_csv(uploaded.getvalue(), uploaded.name)
-            if count == 0:
-                st.info("This exact file was already imported; no duplicate sales were added.")
+            if cloud.bucket_name():
+                if db.BACKEND != "postgresql":
+                    raise RuntimeError("S3 imports require RDS PostgreSQL")
+                payload = uploaded.getvalue()
+                digest = hashlib.sha256(payload).hexdigest()
+                key = f"sales-imports/{digest}.csv"
+                if db.queue_import(digest, uploaded.name, key):
+                    try:
+                        cloud.upload_sales_csv(payload, uploaded.name)
+                    except Exception as exc:
+                        db.fail_import(digest, str(exc))
+                        raise
+                    st.session_state.sales_notice = "CSV uploaded to S3. Lambda will validate and import it."
+                    st.rerun()
+                else:
+                    st.info("This file is already imported or awaiting processing.")
             else:
-                st.session_state.sales_notice = f"Imported {count} sales rows"
-                st.rerun()
+                count = db.import_sales_csv(uploaded.getvalue(), uploaded.name)
+                if count == 0:
+                    st.info("This exact file was already imported; no duplicate sales were added.")
+                else:
+                    st.session_state.sales_notice = f"Imported {count} sales rows"
+                    st.rerun()
         except Exception as exc:
             failure(exc)
 
@@ -285,6 +343,9 @@ elif page == "Sales":
     st.markdown("#### Sales history")
     dataframe(db.table("sales"))
     with st.expander("Import history"):
+        if cloud.bucket_name() and db.BACKEND == "postgresql":
+            st.caption("S3/Lambda import jobs. Refresh this page to see updates.")
+            dataframe(db.table("import_jobs"))
         dataframe(db.table("imports"))
 
 elif page == "Forecast":
@@ -343,10 +404,7 @@ elif page == "Forecast":
                                       x_label="Week ending", y_label="Stock remaining (units)")
                         if recommendation["risk"] == "REORDER":
                             st.warning("Reorder threshold reached. This is a planning estimate.")
-                            if st.button("Record alert locally"):
-                                db.log_alert(sku,
-                                             f"Reorder {recommendation['suggested_order']} units; stock {stock}")
-                                st.success("Alert recorded. SNS will replace this step on AWS.")
+                            check_reorder(sku)
                         st.caption("Projected stock is a scenario, not an automatic stock adjustment.")
                 except Exception as exc:
                     failure(exc)
@@ -423,7 +481,8 @@ elif page == "Accuracy":
 
 elif page == "Alerts":
     st.subheader("Alerts")
-    st.caption("Local alert log. Amazon SNS email delivery is planned for the AWS version.")
+    st.caption("Reorder alerts are created once when stock crosses the threshold. "
+               "SNS email delivery is active when SNS_TOPIC_ARN is configured.")
     dataframe(db.table("alerts"))
 
 else:
