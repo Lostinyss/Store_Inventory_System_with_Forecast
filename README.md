@@ -20,6 +20,8 @@ Every page requires an OIDC sign-in. Copy `.streamlit/secrets.toml.example` to `
 
 Every account that signs in through the configured OIDC user pool can access the website. Keep Cognito self-registration disabled and create only the accounts you intend to admit. Sign out from the sidebar. Keep the separate Model Settings admin key for model uploads and activation.
 
+For Cognito, add the website home URL to the app client's **Allowed sign-out URLs**: `http://localhost:8501/` for a local or SSH-tunnel test, or `https://YOUR_DOMAIN/` online. Streamlit 1.67 sends an OIDC logout parameter that Cognito does not accept; `cognito_logout.py` adapts logout for Cognito's AWS-hosted domain. This compatibility code uses Streamlit's internal auth route, so check it when upgrading Streamlit. Keep the callback URL ending in `/oauth2callback` as a separate app-client setting.
+
 For an AWS deployment, Amazon Cognito can serve as the OIDC provider. See [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md) for the HTTPS and EC2 settings. The S3-triggered CSV Lambda is controlled by AWS IAM and bucket access, not by the website login.
 
 ## Use RDS for PostgreSQL

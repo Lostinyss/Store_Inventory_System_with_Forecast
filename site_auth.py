@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import streamlit as st
 
+from cognito_logout import install_cognito_logout_compatibility
+
+
+install_cognito_logout_compatibility()
+
 
 def require_login() -> None:
     """Stop the Streamlit run before any database, S3, SNS, or page operation."""
