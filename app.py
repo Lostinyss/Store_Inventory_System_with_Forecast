@@ -50,10 +50,14 @@ st.markdown("""
 [data-testid="stSidebar"] button[kind="secondary"]:hover {
     background: #d8e9ea; border-color: #b5d6d8;
 }
+.st-key-sales_record_button button,
+.st-key-sales_import_button button {
+    min-height: 2.75rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
-PAGES = ["Overview", "Inventory", "Sales", "Forecast", "Accuracy", "Alerts", "Settings"]
+PAGES = ["Overview", "Inventory", "Sales", "Forecast", "Alerts"]
 if st.session_state.get("page") not in PAGES:
     st.session_state.page = PAGES[0]
 _, alert_error = alerting.deliver_pending()
@@ -330,10 +334,11 @@ elif page == "Sales":
     title_col, record_col, import_col = st.columns([3, 1, 1])
     title_col.subheader("Sales records")
     products = db.table("products")
-    if record_col.button("Record sale", type="primary", width="stretch",
+    if record_col.button("Record sale", key="sales_record_button", type="primary", width="stretch",
                          disabled=products.empty):
         record_sale_dialog()
-    if import_col.button("Import CSV", width="stretch", disabled=products.empty):
+    if import_col.button("Import CSV", key="sales_import_button", width="stretch",
+                         disabled=products.empty):
         import_sales_dialog()
     st.caption("Use real dates in YYYY-MM-DD format. Historical CSV import does not subtract from current stock.")
     if notice := st.session_state.pop("sales_notice", None):
