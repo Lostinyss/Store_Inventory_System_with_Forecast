@@ -316,8 +316,8 @@ elif page == "Forecast":
             sku = c1.selectbox("Product", products["sku"].tolist(), key="forecast_sku")
             horizon = c2.selectbox("Weeks ahead", [4, 8, 10], key="forecast_horizon")
             history = db.weekly_sales(sku)
-            if len(history) < 4:
-                st.warning("This product needs at least four recorded weeks of sales.")
+            if history.empty:
+                st.info("No sales history yet. Record or import sales for this product on the Sales page to see a forecast.")
             else:
                 st.caption(f"Recorded weeks: {len(history)} · Last week: {history.index[-1].date()}")
                 if len(history) >= 80 and st.button("Train or refresh model for this product"):
@@ -327,8 +327,10 @@ elif page == "Forecast":
                         st.rerun()
                     except Exception as exc:
                         failure(exc)
+                elif len(history) < 4:
+                    st.warning("Limited history. This early estimate uses the average weekly sales recorded so far.")
                 elif len(history) < 80:
-                    st.info("Using a simple last-four-weeks baseline. Trainable model needs 80 consecutive weeks.")
+                    st.info("Using the last four weeks as a repeating pattern. Model training needs 80 consecutive weeks.")
                 try:
                     future, info = fc.local_forecast(sku, history, horizon)
                     st.write("Forecast method:", info["model_name"])

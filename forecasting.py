@@ -190,8 +190,15 @@ def train_local_model(sku: str, history: pd.Series) -> dict:
 
 def local_forecast(sku: str, history: pd.Series,
                    horizon: int = 4) -> tuple[pd.DataFrame, dict]:
+    if history.empty:
+        raise ValueError("No sales history yet")
+    dates = pd.date_range(history.index[-1] + pd.Timedelta(days=7),
+                          periods=horizon, freq="W-SUN")
     if len(history) < 4:
-        raise ValueError("Need at least four recorded weeks")
+        estimate = max(0.0, float(history.mean()))
+        info = {"model_name": "Average weekly sales (limited history)",
+                "trained_through": None, "test_wape": None}
+        return pd.DataFrame({"week_end": dates, "forecast_units": estimate}), info
     path = active_local_model_path(sku)
     artifact = joblib.load(path) if path.exists() else None
     if artifact and artifact["trained_through"] != history.index[-1].date().isoformat():
@@ -199,8 +206,6 @@ def local_forecast(sku: str, history: pd.Series,
     if artifact and artifact["model_name"] == "Ridge" and len(history) >= MIN_HISTORY:
         return _predict_local(history, artifact["model"], horizon), artifact
     values = history.to_numpy(dtype=float).tolist()
-    dates = pd.date_range(history.index[-1] + pd.Timedelta(days=7),
-                          periods=horizon, freq="W-SUN")
     preds = []
     for _ in dates:
         pred = max(0.0, float(values[-4]))

@@ -20,7 +20,7 @@ def check_product(sku: str) -> bool:
     safety = int(product["safety_stock"])
     lead_weeks = max(1, math.ceil(int(product["lead_time_days"]) / 7))
     history = db.weekly_sales(sku)
-    if len(history) >= 4:
+    if not history.empty:
         forecast, _ = fc.local_forecast(sku, history, lead_weeks)
         reorder_point = math.ceil(float(forecast["forecast_units"].sum()) + safety)
     else:

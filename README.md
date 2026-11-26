@@ -24,7 +24,7 @@ Use sample data on Community Cloud. The host may clear local files, including th
 
 1. In **Inventory**, add a product with Product ID `DEMO-001` and set its stock in the **Stock** tab.
 2. In **Sales**, import `sample_data/demo_product_sales_104_weeks.csv` to load synthetic history. A sales CSV needs `sale_date,product_id,quantity_sold`, dates in YYYY-MM-DD format, and positive whole quantities. Existing CSVs with `sku` in place of `product_id` are also accepted. Create each product before importing. Importing the same file again does not duplicate sales. Historical imports do not change current stock.
-3. In **Forecast → My products**, open the product forecast and stock simulation. The baseline uses the last four weeks. With at least 80 consecutive weeks, **Train or refresh model** compares Ridge with the baseline and saves the selected model locally.
+3. In **Forecast → My products**, choose any product. With no sales, the app prompts you to add history. With one to three weeks, it shows an early estimate based on average weekly sales. The standard baseline repeats the last four weeks. With at least 80 consecutive weeks, **Train or refresh model** compares Ridge with the baseline and saves the selected model locally.
 4. Record a sale in **Sales** and choose whether to deduct the quantity from stock. Check **Alerts** for reorder notices when stock reaches the threshold. Alerts are displayed in the app.
 
 The **Historical Kaggle model** tab shows a separate demonstration based on combined historical Global Superstore sales. Product forecasts use the selected product's sales in SQLite. Missing weeks between a product's first and last sale are treated as zero sales. Synthetic data is intended to demonstrate app behavior.
