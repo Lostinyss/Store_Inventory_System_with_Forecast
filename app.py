@@ -69,7 +69,8 @@ if notice := st.session_state.pop("alert_notice", None):
     st.warning(notice)
 
 def dataframe(frame: pd.DataFrame) -> None:
-    st.dataframe(frame, width="stretch", hide_index=True)
+    st.dataframe(frame, width="stretch", hide_index=True,
+                 column_config={"sku": "Product ID"})
 
 
 def failure(exc: Exception) -> None:
@@ -85,7 +86,7 @@ def product_editor(sku: str | None = None) -> None:
     row = products.set_index("sku").loc[sku] if sku is not None else None
     st.subheader("Edit product" if row is not None else "Add product")
     with st.form("product_dialog_form"):
-        chosen_sku = st.text_input("SKU", value="" if row is None else sku,
+        chosen_sku = st.text_input("Product ID", value="" if row is None else sku,
                                    disabled=row is not None)
         name = st.text_input("Product name", value="" if row is None else row["name"])
         category = st.text_input("Category", value="" if row is None else row["category"])
@@ -159,8 +160,8 @@ def record_sale_dialog() -> None:
 
 @st.dialog("Import sales CSV", width="small")
 def import_sales_dialog() -> None:
-    st.caption("Required columns: sale_date, sku, quantity_sold. Use YYYY-MM-DD dates.")
-    template = b"sale_date,sku,quantity_sold\n2026-10-01,YOUR-SKU,8\n"
+    st.caption("Required columns: sale_date, product_id, quantity_sold. Use YYYY-MM-DD dates. Existing CSVs with a sku column also work.")
+    template = (db.ROOT / "sample_data" / "sales_template.csv").read_bytes()
     st.download_button("Download CSV template", template, "sales_template.csv", "text/csv")
     uploaded = st.file_uploader("Sales CSV", type="csv")
     if st.button("Validate and import", type="primary", disabled=uploaded is None):
@@ -228,7 +229,7 @@ if page == "Overview":
     st.markdown("<div class='note'>Product-level forecasts use sales entered in this app. The original Kaggle model is a separate historical, all-products demo.</div>", unsafe_allow_html=True)
     left, right = st.columns([1, 1])
     with left:
-        st.markdown("#### Stock by SKU")
+        st.markdown("#### Stock by product")
         dataframe(inventory)
     with right:
         st.markdown("#### Latest sales")

@@ -22,8 +22,8 @@ Use sample data on Community Cloud. The host may clear local files, including th
 
 ## Try the demo
 
-1. In **Inventory**, add a product with SKU `DEMO-001` and set its stock in the **Stock** tab.
-2. In **Sales**, import `sample_data/demo_product_sales_104_weeks.csv` to load synthetic history. A sales CSV needs `sale_date,sku,quantity_sold`, dates in YYYY-MM-DD format, and positive whole quantities. Create each SKU before importing. Importing the same file again does not duplicate sales. Historical imports do not change current stock.
+1. In **Inventory**, add a product with Product ID `DEMO-001` and set its stock in the **Stock** tab.
+2. In **Sales**, import `sample_data/demo_product_sales_104_weeks.csv` to load synthetic history. A sales CSV needs `sale_date,product_id,quantity_sold`, dates in YYYY-MM-DD format, and positive whole quantities. Existing CSVs with `sku` in place of `product_id` are also accepted. Create each product before importing. Importing the same file again does not duplicate sales. Historical imports do not change current stock.
 3. In **Forecast → My products**, open the product forecast and stock simulation. The baseline uses the last four weeks. With at least 80 consecutive weeks, **Train or refresh model** compares Ridge with the baseline and saves the selected model locally.
 4. Record a sale in **Sales** and choose whether to deduct the quantity from stock. Check **Alerts** for reorder notices when stock reaches the threshold. Alerts are displayed in the app.
 

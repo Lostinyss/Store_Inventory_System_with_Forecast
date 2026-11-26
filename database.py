@@ -130,7 +130,7 @@ def save_product(sku: str, name: str, category: str, storage_location: str,
                  lead_time_days: int, safety_stock: int) -> None:
     sku, name = sku.strip(), name.strip()
     if not sku or not name:
-        raise ValueError("SKU and product name are required")
+        raise ValueError("Product ID and product name are required")
     with connect() as db:
         db.execute("""INSERT INTO products
             (sku,name,category,storage_location,lead_time_days,safety_stock)
@@ -193,7 +193,11 @@ def import_sales_csv(file_bytes: bytes, file_name: str) -> int:
     except Exception as exc:
         raise ValueError(f"Cannot read CSV: {exc}") from exc
     frame.columns = frame.columns.str.strip()
-    required = {"sale_date", "sku", "quantity_sold"}
+    if "product_id" in frame.columns and "sku" in frame.columns:
+        raise ValueError("Use one product ID column: product_id or sku.")
+    if "sku" in frame.columns:
+        frame = frame.rename(columns={"sku": "product_id"})
+    required = {"sale_date", "product_id", "quantity_sold"}
     if not required.issubset(frame.columns):
         raise ValueError(f"Missing CSV columns: {', '.join(sorted(required - set(frame.columns)))}")
     if frame.empty:
@@ -206,14 +210,14 @@ def import_sales_csv(file_bytes: bytes, file_name: str) -> int:
         raise ValueError("sale_date must use YYYY-MM-DD in every row")
     if qty.isna().any() or (qty <= 0).any() or (qty % 1 != 0).any():
         raise ValueError("quantity_sold must be a positive whole number")
-    sku = frame["sku"].fillna("").str.strip()
+    sku = frame["product_id"].fillna("").str.strip()
     if (sku == "").any():
-        raise ValueError("sku cannot be blank")
+        raise ValueError("Product ID cannot be blank")
     with connect() as db:
         known_skus = {r[0] for r in db.execute("SELECT sku FROM products")}
         missing_skus = set(sku) - known_skus
         if missing_skus:
-            raise ValueError(f"Create products first. Missing SKUs: {sorted(missing_skus)}")
+            raise ValueError(f"Create products first. Missing product IDs: {sorted(missing_skus)}")
         rows = [(parsed_dates.iloc[i].date().isoformat(), STORE_ID,
                  sku.iloc[i], int(qty.iloc[i]), "csv", f"{file_hash}:{i}")
                 for i in range(len(frame))]
